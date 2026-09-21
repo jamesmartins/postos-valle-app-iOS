@@ -5,12 +5,11 @@ enum AppConstants {
     static let bunkerAppHost = "https://adm.bunkerapp.com.br"
     static let bunkerMkHost = "https://adm.bunker.mk"
 
-    /// Chaves candidatas do aplicativo Postos Valle no Bunker.
-    /// Preferencialmente preenchidas em runtime via `APP.do` (`AppRuntimeConfig`).
-    /// Atualize estes fallbacks se o Bunker fornecer a chave curta de `app.do?key=`.
-    static let bunkerAppKey = ""
-    static let bunkerAppKeyWithoutCent = ""
-    static let bunkerAppKeyBase64 = ""
+    /// Chaves candidatas do aplicativo Postos Valle no Bunker (`app.do?key=`).
+    /// Forma curta decodificada + Base64 (como veio do Bunker).
+    static let bunkerAppKey = "Ys£p£u6k50jp£M¢"
+    static let bunkerAppKeyWithoutCent = "Yspu6k50jpM"
+    static let bunkerAppKeyBase64 = "WXPCo3DCo3U2azUwanDCo03Cog=="
     static let bunkerAppKeyLegacy = ""
 
     /// Código da empresa no Bunker para ConsultaCli.
