@@ -7,17 +7,16 @@ struct HomeView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            PostosValleColors.primaryBlue.ignoresSafeArea()
+            PostosValleColors.brandGreen.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                navigationHeader
-
                 VStack(spacing: 0) {
                     topSection
                         .padding(.horizontal, 16)
-                        .padding(.top, 16)
+                        .padding(.top, 8)
                         .padding(.bottom, 14)
 
+                    // Resgatado / Expirado — somente visualização
                     summaryRow
                         .padding(.horizontal, 16)
                         .padding(.bottom, 14)
@@ -72,59 +71,38 @@ struct HomeView: View {
 
     // MARK: - Subviews
 
-    private var navigationHeader: some View {
-        HStack {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .opacity(0.35)
+    private var topSection: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(viewModel.greeting)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
-            Spacer()
+                Text("Saldo disponível")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(PostosValleColors.textSecondary)
+                    .padding(.top, 2)
 
-            Text("Navegação")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.white)
+                Text(viewModel.formattedPoints(viewModel.availableBalance))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
 
-            Spacer()
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.white.opacity(0.9))
+                        .padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Image("LogoPostosValleBadge")
                 .resizable()
                 .scaledToFit()
-                .frame(height: 36)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: 56, height: 56)
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity)
-        .background(PostosValleColors.brandGreen.ignoresSafeArea(edges: .top))
-    }
-
-    private var topSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(viewModel.greeting)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Text("Saldo disponível")
-                .font(.system(size: 14, weight: .regular))
-                .foregroundColor(PostosValleColors.textSecondary)
-                .padding(.top, 2)
-
-            Text(viewModel.formattedPoints(viewModel.availableBalance))
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.white)
-
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color.white.opacity(0.9))
-                    .padding(.top, 2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var summaryRow: some View {
@@ -151,7 +129,7 @@ struct HomeView: View {
                     Text("Gerar Token")
                         .font(.system(size: 15, weight: .bold))
                 }
-                .foregroundColor(PostosValleColors.primaryBlue)
+                .foregroundColor(PostosValleColors.brandGreen)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background(Color.white)
