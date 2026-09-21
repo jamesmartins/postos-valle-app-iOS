@@ -33,9 +33,18 @@ final class HomeViewModel: ObservableObject {
         self.sessionUseCase = sessionUseCase
 
         let session = sessionUseCase.currentSession()
-        let initialName = session.userName ?? "Cliente"
-        self.userName = initialName
-        self.firstName = Self.extractFirstName(from: initialName)
+        let cached = session.userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if Self.isPlausibleDisplayName(cached) {
+            self.userName = cached
+            self.firstName = Self.capitalizePersonName(Self.extractFirstName(from: cached))
+        } else {
+            // Evita saudação com login Bunker persistido
+            self.userName = "Cliente"
+            self.firstName = "Cliente"
+            if !cached.isEmpty {
+                AppLogger.warning(.app, "userName em cache ignorado: '\(cached)'")
+            }
+        }
     }
 
     var greeting: String {
@@ -77,17 +86,12 @@ final class HomeViewModel: ObservableObject {
             await loadMenuLinks()
         }
 
-        if let idU = session.idU, session.userName == nil {
-            Task {
-                if let name = try? await consultCliUseCase.execute(userID: idU) {
-                    self.applyUserName(name)
-                    self.sessionUseCase.save(userName: name)
-                }
-            }
-        }
-
         guard let cpf = session.cpf, !cpf.isEmpty else {
+            // Sem CPF não dá para consultar dadoscompras — tenta só o fallback de perfil.
             errorMessage = "CPF não encontrado na sessão."
+            if let idU = session.idU {
+                Task { await loadNameFromConsultaCliIfNeeded(idU: idU) }
+            }
             return
         }
 
@@ -95,18 +99,14 @@ final class HomeViewModel: ObservableObject {
         errorMessage = nil
 
         Task {
+            var resolvedNameFromCompras = false
+
             do {
                 let dashboard = try await fetchDadosComprasUseCase.execute(cpf: cpf, pagina: 1)
                 self.isLoading = false
 
                 if let cliente = dashboard.cliente {
-                    if let primeiroNome = cliente.primeiroNome, !primeiroNome.isEmpty {
-                        self.firstName = primeiroNome
-                        self.userName = cliente.nome
-                    } else {
-                        self.applyUserName(cliente.nome)
-                    }
-                    self.sessionUseCase.save(userName: self.userName)
+                    resolvedNameFromCompras = self.applyClienteFromCompras(cliente)
                 }
 
                 if let saldo = dashboard.saldo {
@@ -125,6 +125,58 @@ final class HomeViewModel: ObservableObject {
                 self.errorMessage = error.localizedDescription
                 AppLogger.logFailure(.app, operation: "HomeViewModel.loadData", error: error)
             }
+
+            // ConsultaCli só como fallback — nunca em paralelo, para não sobrescrever
+            // o nome real (ex.: "Diego") com o login do Bunker (ex.: "ovppyo").
+            if !resolvedNameFromCompras, let idU = session.idU {
+                await loadNameFromConsultaCliIfNeeded(idU: idU)
+            }
+        }
+    }
+
+    /// Aplica nome vindo de `dadoscompras` (fonte preferencial da saudação).
+    @discardableResult
+    private func applyClienteFromCompras(_ cliente: Cliente) -> Bool {
+        let fullName = cliente.nome.trimmingCharacters(in: .whitespacesAndNewlines)
+        let primeiro = cliente.primeiroNome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !primeiro.isEmpty, Self.isPlausibleDisplayName(primeiro) {
+            firstName = Self.capitalizePersonName(primeiro)
+            userName = fullName.isEmpty ? primeiro : fullName
+            sessionUseCase.save(userName: userName)
+            AppLogger.info(.app, "Home nome via dadoscompras.primeiro_nome: '\(firstName)'")
+            return true
+        }
+
+        if !fullName.isEmpty, Self.isPlausibleDisplayName(fullName) {
+            applyUserName(fullName)
+            sessionUseCase.save(userName: userName)
+            AppLogger.info(.app, "Home nome via dadoscompras.nome: '\(firstName)'")
+            return true
+        }
+
+        AppLogger.warning(.app, "dadoscompras sem nome utilizável (nome='\(fullName)', primeiro='\(primeiro)')")
+        return false
+    }
+
+    /// Fallback quando `dadoscompras` não trouxe nome. Não sobrescreve nome já válido.
+    private func loadNameFromConsultaCliIfNeeded(idU: String) async {
+        if Self.isPlausibleDisplayName(firstName), firstName != "Cliente" {
+            return
+        }
+
+        do {
+            guard let name = try await consultCliUseCase.execute(userID: idU) else { return }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard Self.isPlausibleDisplayName(trimmed) else {
+                AppLogger.warning(.app, "ConsultaCli ignorado — nome improváável: '\(trimmed)'")
+                return
+            }
+            applyUserName(trimmed)
+            sessionUseCase.save(userName: userName)
+            AppLogger.info(.app, "Home nome via ConsultaCli (fallback): '\(firstName)'")
+        } catch {
+            AppLogger.logFailure(.app, operation: "HomeViewModel.ConsultaCli", error: error)
         }
     }
 
@@ -140,13 +192,45 @@ final class HomeViewModel: ObservableObject {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         userName = trimmed
-        firstName = Self.extractFirstName(from: trimmed)
+        firstName = Self.capitalizePersonName(Self.extractFirstName(from: trimmed))
     }
 
     private static func extractFirstName(from fullName: String) -> String {
         let trimmed = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "Cliente" }
         return trimmed.components(separatedBy: .whitespaces).first ?? trimmed
+    }
+
+    /// Rejeita logins/usuários Bunker (ex.: "ovppyo") e lixo sem letras.
+    private static func isPlausibleDisplayName(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return false }
+        guard trimmed.rangeOfCharacter(from: .letters) != nil else { return false }
+
+        // Login tipicamente tudo minúsculo, sem espaço e sem acento de nome próprio.
+        let hasSpace = trimmed.contains(where: { $0.isWhitespace })
+        let letters = trimmed.filter { $0.isLetter }
+        let lowercaseRatio = letters.isEmpty
+            ? 0.0
+            : Double(letters.filter { $0.isLowercase }.count) / Double(letters.count)
+
+        if !hasSpace, letters.count >= 4, lowercaseRatio == 1.0, !trimmed.contains(where: { $0 == " " }) {
+            // "diego" ok se for curto? Preferimos aceitar se parece nome comum com capitalização depois.
+            // Bloqueia padrões claramente de login: sem maiúscula e sem vogal acentuada / parece handle.
+            let vowels = CharacterSet(charactersIn: "aeiouAEIOUáàâãéêíóôõúÁÀÂÃÉÊÍÓÔÕÚ")
+            let vowelCount = trimmed.unicodeScalars.filter { vowels.contains($0) }.count
+            // Handles curtos só com minúsculas (ex.: ovppyo) — rejeitar.
+            if vowelCount <= 2, trimmed.count <= 8 {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private static func capitalizePersonName(_ value: String) -> String {
+        guard let first = value.first else { return value }
+        return String(first).uppercased() + value.dropFirst()
     }
 
     func handleMenuItemSelection(_ item: HomeMenuItem) {
