@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum PostosValleColors {
-    /// Verde principal Postos Valle (~#82BC41) — fundo da Home
+    /// Verde do header / branding da Home (~#82BC41)
     static let brandGreen = Color(red: 0.51, green: 0.74, blue: 0.25)
 
     /// Alias: Home usa o verde da marca
