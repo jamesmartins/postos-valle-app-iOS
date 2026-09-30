@@ -53,15 +53,20 @@ final class HTTPClient: HTTPClientProtocol, @unchecked Sendable {
         let (data, response) = try await requestRaw(endpoint)
 
         guard 200...299 ~= response.statusCode else {
-            let errorMsg = String(data: data, encoding: .utf8)
-            let error = NetworkError.requestFailed(response.statusCode, errorMsg)
-            throw error
+            throw NetworkError.fromHTTP(statusCode: response.statusCode, data: data)
         }
 
         do {
             let decoded = try JSONDecoder().decode(T.self, from: data)
             return decoded
         } catch {
+            // Body 2xx com payload de erro Bunker (`errors[].message`)
+            if let bunkerMessage = NetworkError.parseBunkerErrorMessage(from: data) {
+                if NetworkError.isAccessKeyOrAuthFailure(bunkerMessage) {
+                    throw NetworkError.unauthorized
+                }
+                throw NetworkError.serverError(bunkerMessage)
+            }
             AppLogger.logDecodingFailure(type: T.self, endpoint: endpoint, error: error, data: data)
             throw NetworkError.failedDecoding(error.localizedDescription)
         }
@@ -85,7 +90,7 @@ final class HTTPClient: HTTPClientProtocol, @unchecked Sendable {
             if 200...299 ~= httpResponse.statusCode {
                 AppLogger.logResponse(endpoint, statusCode: httpResponse.statusCode, data: data, duration: duration)
             } else {
-                let err = NetworkError.requestFailed(httpResponse.statusCode, String(data: data, encoding: .utf8))
+                let err = NetworkError.fromHTTP(statusCode: httpResponse.statusCode, data: data)
                 AppLogger.logNetworkFailure(endpoint, statusCode: httpResponse.statusCode, error: err, data: data, duration: duration)
             }
 

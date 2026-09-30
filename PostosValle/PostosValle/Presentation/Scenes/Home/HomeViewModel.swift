@@ -122,12 +122,29 @@ final class HomeViewModel: ObservableObject {
                 }
             } catch {
                 self.isLoading = false
-                self.errorMessage = error.localizedDescription
-                AppLogger.logFailure(.app, operation: "HomeViewModel.loadData", error: error)
+
+                if error.requiresSessionLogout {
+                    AppLogger.warning(
+                        .auth,
+                        "Erro de autenticação/chave na Home — forçando logout: \(error.localizedDescription)"
+                    )
+                    self.errorMessage = nil
+                    await self.completeLogout()
+                    return
+                }
+
+                let message = error.localizedDescription
+                if NetworkError.isRawJSONPayload(message) {
+                    self.errorMessage = nil
+                    AppLogger.logFailure(.app, operation: "HomeViewModel.loadData", error: error)
+                } else {
+                    self.errorMessage = message
+                    AppLogger.logFailure(.app, operation: "HomeViewModel.loadData", error: error)
+                }
             }
 
             // ConsultaCli só como fallback — nunca em paralelo, para não sobrescrever
-            // o nome real (ex.: "Diego") com o login do Bunker (ex.: "ovppyo").
+            // o nome real com o login do Bunker.
             if !resolvedNameFromCompras, let idU = session.idU {
                 await loadNameFromConsultaCliIfNeeded(idU: idU)
             }
@@ -215,11 +232,10 @@ final class HomeViewModel: ObservableObject {
             : Double(letters.filter { $0.isLowercase }.count) / Double(letters.count)
 
         if !hasSpace, letters.count >= 4, lowercaseRatio == 1.0, !trimmed.contains(where: { $0 == " " }) {
-            // "diego" ok se for curto? Preferimos aceitar se parece nome comum com capitalização depois.
             // Bloqueia padrões claramente de login: sem maiúscula e sem vogal acentuada / parece handle.
             let vowels = CharacterSet(charactersIn: "aeiouAEIOUáàâãéêíóôõúÁÀÂÃÉÊÍÓÔÕÚ")
             let vowelCount = trimmed.unicodeScalars.filter { vowels.contains($0) }.count
-            // Handles curtos só com minúsculas (ex.: ovppyo) — rejeitar.
+            // Handles curtos só com minúsculas — rejeitar.
             if vowelCount <= 2, trimmed.count <= 8 {
                 return false
             }
