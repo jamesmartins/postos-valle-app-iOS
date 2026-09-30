@@ -20,6 +20,7 @@ final class HomeViewModel: ObservableObject {
     private(set) var menuLinks: [String: String] = [:]
     var onLogout: (() -> Void)?
     private var isCompletingLogout = false
+    private var menuLinksTask: Task<Void, Never>?
 
     init(
         fetchDadosComprasUseCase: FetchDadosComprasUseCase,
@@ -198,11 +199,29 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadMenuLinks() async {
-        do {
-            self.menuLinks = try await fetchAppConfigUseCase.execute()
-        } catch {
-            AppLogger.logFailure(.app, operation: "HomeViewModel.loadMenuLinks", error: error)
+        // Reusa links já pré-carregados no bootstrap / cache em memória
+        let runtimeLinks = AppRuntimeConfig.shared.menuLinks
+        if menuLinks.isEmpty, !runtimeLinks.isEmpty {
+            menuLinks = runtimeLinks
+            AppLogger.info(.app, "menuLinks hidratados do AppRuntimeConfig (\(runtimeLinks.count))")
         }
+
+        if let menuLinksTask {
+            await menuLinksTask.value
+            return
+        }
+
+        let task = Task { @MainActor in
+            do {
+                self.menuLinks = try await fetchAppConfigUseCase.execute()
+            } catch {
+                // Cache do repositório já tenta cobrir timeout; se ainda falhar, cards usam fallback.
+                AppLogger.logFailure(.app, operation: "HomeViewModel.loadMenuLinks", error: error)
+            }
+            self.menuLinksTask = nil
+        }
+        menuLinksTask = task
+        await task.value
     }
 
     func applyUserName(_ raw: String) {

@@ -72,32 +72,65 @@ final class DadosComprasRepository: DadosComprasRepositoryProtocol {
 }
 
 final class AppConfigRepository: AppConfigRepositoryProtocol {
-    private let client: HTTPClientProtocol
+    private let client: HTTPClient
+    private let defaults: UserDefaults
+    private static let cacheKey = "postos_valle.cached_app_do_links"
+    /// Evita N chamadas paralelas a APP.do (bootstrap + Home).
+    private static var inFlight: Task<[String: String], Error>?
 
-    init(client: HTTPClientProtocol = HTTPClient.shared) {
+    init(
+        client: HTTPClient = .shared,
+        defaults: UserDefaults = .standard
+    ) {
         self.client = client
+        self.defaults = defaults
     }
 
     func fetchAppConfig() async throws -> [String: String] {
+        if let inFlight = Self.inFlight {
+            AppLogger.info(.repository, "APP.do já em andamento — reutilizando a mesma Task")
+            return try await inFlight.value
+        }
+
+        let task = Task<[String: String], Error> {
+            try await self.performFetchWithRetryAndCache()
+        }
+        Self.inFlight = task
+        defer { Self.inFlight = nil }
+
+        return try await task.value
+    }
+
+    private func performFetchWithRetryAndCache() async throws -> [String: String] {
         AppLogger.info(.repository, "Carregando configurações e links de menu do APP.do...")
+
+        let auth = AppSecrets.authorizationCodePadded
+        guard !auth.isEmpty else {
+            if let cached = loadCachedLinks() {
+                AppLogger.warning(.repository, "authorizationCode vazio — usando cache APP.do (\(cached.count) links)")
+                await applyLinks(cached)
+                return cached
+            }
+            throw NetworkError.invalidParameters("authorizationCode ausente no Secrets.plist")
+        }
 
         let endpoint = Endpoint(
             urlString: AppConstants.appConfigURLString,
             method: .GET,
             headers: [
-                "authorizationCode": AppSecrets.authorizationCodePadded
+                "authorizationCode": auth
             ],
-            parameters: nil
+            parameters: nil,
+            timeoutInterval: 15
         )
 
         do {
-            let response: AppConfigResponseDTO = try await client.request(endpoint)
+            let response: AppConfigResponseDTO = try await client.requestWithRetry(endpoint, attempts: 3)
             let links = response.novoMenu?.links ?? [:]
             let keys = links.keys.sorted().joined(separator: ", ")
 
-            await MainActor.run {
-                AppRuntimeConfig.shared.update(from: links)
-            }
+            await applyLinks(links)
+            persistLinks(links)
 
             AppLogger.logSuccess(
                 .repository,
@@ -106,9 +139,33 @@ final class AppConfigRepository: AppConfigRepositoryProtocol {
             )
             return links
         } catch {
+            if let cached = loadCachedLinks(), !cached.isEmpty {
+                AppLogger.warning(
+                    .repository,
+                    "APP.do falhou (\(error.localizedDescription)) — usando cache com \(cached.count) links"
+                )
+                await applyLinks(cached)
+                return cached
+            }
+
             AppLogger.logFailure(.repository, operation: "AppConfigRepository.fetchAppConfig", error: error)
             throw error
         }
+    }
+
+    private func applyLinks(_ links: [String: String]) async {
+        await MainActor.run {
+            AppRuntimeConfig.shared.update(from: links)
+        }
+    }
+
+    private func persistLinks(_ links: [String: String]) {
+        guard !links.isEmpty else { return }
+        defaults.set(links, forKey: Self.cacheKey)
+    }
+
+    private func loadCachedLinks() -> [String: String]? {
+        defaults.dictionary(forKey: Self.cacheKey) as? [String: String]
     }
 }
 
