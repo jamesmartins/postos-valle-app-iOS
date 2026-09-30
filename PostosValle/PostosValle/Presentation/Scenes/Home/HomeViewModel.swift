@@ -257,13 +257,36 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
+        Task {
+            await openMenuItem(item)
+        }
+    }
+
+    /// Garante links do APP.do e monta a URL do card (com `t=` quando disponível).
+    private func openMenuItem(_ item: HomeMenuItem) async {
+        if menuLinks.isEmpty {
+            AppLogger.info(.app, "menuLinks vazio — recarregando APP.do antes de abrir '\(item.rawValue)'")
+            await loadMenuLinks()
+        }
+
         let session = sessionUseCase.currentSession()
+        let sharedToken = BunkerURLBuilder.anyToken(from: menuLinks)
 
         if let linkKey = item.novoMenuLinkKey, let rawURL = menuLinks[linkKey] {
-            if let builtURL = BunkerURLBuilder.build(from: rawURL, idU: session.idU) {
+            if let builtURL = BunkerURLBuilder.build(
+                from: rawURL,
+                idU: session.idU,
+                fallbackToken: sharedToken
+            ) {
                 selectedWebItem = (url: builtURL, title: item.rawValue, isLogout: false)
                 return
             }
+            AppLogger.warning(.app, "Falha ao montar URL do APP.do para chave '\(linkKey)'")
+        } else if let linkKey = item.novoMenuLinkKey {
+            AppLogger.warning(
+                .app,
+                "Link '\(linkKey)' ausente no APP.do. Chaves: [\(menuLinks.keys.sorted().joined(separator: ", "))]"
+            )
         }
 
         let fallbackBase: String
@@ -282,11 +305,15 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        let builtURL = BunkerURLBuilder.build(from: fallbackBase, idU: session.idU)
-        if let url = builtURL {
+        if let url = BunkerURLBuilder.build(
+            from: fallbackBase,
+            idU: session.idU,
+            fallbackToken: sharedToken
+        ) {
             selectedWebItem = (url: url, title: item.rawValue, isLogout: false)
         } else {
-            errorMessage = "Link temporariamente indisponível para \(item.rawValue)."
+            AppLogger.warning(.app, "Link indisponível para \(item.rawValue) (idU/key/token ausentes)")
+            // Não mostra JSON/erro técnico na Home; só log.
         }
     }
 

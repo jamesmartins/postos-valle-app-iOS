@@ -295,8 +295,10 @@ struct WKWebViewRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.processPool = SharedWebKit.processPool
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let contentController = configuration.userContentController
         contentController.add(context.coordinator, name: "cpfCapture")

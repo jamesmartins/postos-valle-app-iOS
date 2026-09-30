@@ -41,15 +41,15 @@ struct HomeView: View {
         }
         .fullScreenCover(item: Binding(
             get: {
-                if let item = viewModel.selectedWebItem {
-                    return WebSheetItem(url: item.url, title: item.title, isLogout: item.isLogout)
+                // id estável (url+title) — UUID novo a cada get() recria a WKWebView e quebra o WebContent
+                viewModel.selectedWebItem.map {
+                    WebSheetItem(url: $0.url, title: $0.title, isLogout: $0.isLogout)
                 }
-                return nil
             },
             set: { newValue in
                 if newValue == nil, viewModel.selectedWebItem?.isLogout == true {
                     Task { await viewModel.completeLogout() }
-                } else {
+                } else if newValue == nil {
                     viewModel.selectedWebItem = nil
                 }
             }
@@ -66,6 +66,7 @@ struct HomeView: View {
                     }
                 }
             )
+            .id(sheetItem.id)
         }
     }
 
@@ -184,11 +185,13 @@ struct HomeView: View {
     }
 }
 
-private struct WebSheetItem: Identifiable {
-    let id = UUID()
+private struct WebSheetItem: Identifiable, Equatable {
     let url: URL
     let title: String
     let isLogout: Bool
+
+    /// Identidade estável enquanto a mesma URL/title estiver aberta.
+    var id: String { "\(isLogout ? "logout" : "web")|\(title)|\(url.absoluteString)" }
 }
 
 #Preview {
